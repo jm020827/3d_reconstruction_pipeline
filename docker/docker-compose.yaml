@@ -1,0 +1,12 @@
+services:
+  teleop:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    network_mode: host
+    devices:
+      - /dev/input:/dev/input
+    environment:
+      - ROS_DOMAIN_ID=0
+    stdin_open: true
+    tty: true
