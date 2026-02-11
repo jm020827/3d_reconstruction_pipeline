@@ -5,4 +5,4 @@ ENV/
 
 # 환경 변수 및 비밀 설정
 **/.env
-*.local
+*.local_token
