@@ -1,24 +1,53 @@
 #!/bin/bash
+set -e
 
-# 1. Your Isaac Sim Python Path
-ISAAC_PYTHON="/home/worv/isaacsim/python.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# 2. current shell check and source ROS 2
-if [[ "$SHELL" == *"zsh"* ]]; then
-    echo "[Pipeline] Zsh detected. Sourcing setup.zsh"
-    source /opt/ros/jazzy/setup.zsh
-else
-    echo "[Pipeline] Bash detected. Sourcing setup.bash"
-    source /opt/ros/jazzy/setup.bash
+if [ -f "${SCRIPT_DIR}/.env" ]; then
+    set -a
+    source "${SCRIPT_DIR}/.env"
+    set +a
 fi
 
-export PYTHONPATH=$(echo $PYTHONPATH | sed -e 's|/opt/ros/jazzy/lib/python3.12/site-packages||g')
+ISAAC_SIM_PYTHON="${ISAAC_SIM_PYTHON:-${ISAAC_PYTHON:-}}"
+ROS_SETUP_SCRIPT="${ROS_SETUP_SCRIPT:-}"
+ROS_SETUP_ZSH="${ROS_SETUP_ZSH:-}"
+ROS_PYTHON_SITE_PACKAGES="${ROS_PYTHON_SITE_PACKAGES:-}"
 
-# 3. start pipeline
-if [ -f "$ISAAC_PYTHON" ]; then
-    # pass args ($@)
-    $ISAAC_PYTHON run_pipeline.py "$@"
-else
-    echo "[Error] Isaac Sim launcher not found at: $ISAAC_PYTHON"
+if [ -z "$ISAAC_SIM_PYTHON" ]; then
+    echo "[Error] ISAAC_SIM_PYTHON not set. Configure it in pipeline/.env."
     exit 1
+fi
+
+if [ -z "$ROS_SETUP_SCRIPT" ]; then
+    echo "[Error] ROS_SETUP_SCRIPT not set. Configure it in pipeline/.env."
+    exit 1
+fi
+
+if [[ "$SHELL" == *"zsh"* ]] && [ -n "$ROS_SETUP_ZSH" ]; then
+    echo "[Pipeline] Zsh detected. Sourcing ROS setup: $ROS_SETUP_ZSH"
+    source "$ROS_SETUP_ZSH"
+else
+    echo "[Pipeline] Bash detected. Sourcing ROS setup: $ROS_SETUP_SCRIPT"
+    source "$ROS_SETUP_SCRIPT"
+fi
+
+if [ -n "$ROS_PYTHON_SITE_PACKAGES" ]; then
+    export PYTHONPATH
+    PYTHONPATH=$(echo "$PYTHONPATH" | sed -e "s|${ROS_PYTHON_SITE_PACKAGES}||g")
+fi
+
+if [ -f "$ISAAC_SIM_PYTHON" ]; then
+    "$ISAAC_SIM_PYTHON" "${SCRIPT_DIR}/run_pipeline.py" "$@"
+else
+    echo "[Error] Isaac Sim launcher not found at: $ISAAC_SIM_PYTHON"
+    exit 1
+fi
+
+if [ "${RUN_FIXER_TO_VIDEO:-0}" = "1" ]; then
+    if [ -x "${SCRIPT_DIR}/fixer_to_video.sh" ]; then
+        "${SCRIPT_DIR}/fixer_to_video.sh"
+    else
+        echo "[Warn] fixer_to_video.sh not found or not executable."
+    fi
 fi
