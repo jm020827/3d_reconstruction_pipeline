@@ -1,0 +1,139 @@
+1. isaacSim map import & teleop pipeline -> Costnav repository 에 branch 파서 push해두기? 근데.. 이미 costnav 는 map 을 열어서 teleop 설정하는건 더 잘 pipeline 이 구성되어있느데 어떡하지?
+ 1- docker & isaacSim 설정 맞추기
+ 2- costnav는 teleop 에 rclpy 사용할텐데 거기에 맞춰야할듯? 그럼 python 3.11 로 고정?
+ 3- 어떤 폴더에 push 해둬야하나? map 을 받아온다면 어떤 폴더로 지정? 근데 map 을 받아오는게 중요한게 아니라 map 을 바로 만들어서 저장하는게 목표아닌가?!
+ 4- 
+
+cusfm_cli --input_dir /home/worv/3d_reconstruction_pipeline/robotics_dataset/nova_carter-galileo/raw_images/rosbag_mapping_data/front_stereo_camera_left \
+    --cusfm_base_dir /home/worv/3d_reconstruction_pipeline/cusfm_output \
+    --min_inter_frame_distance 0.06 \
+    --min_inter_frame_rotation_degrees=1.5
+    
+    
+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
+
+1. autonomous-vehicle dataset 의 경우 volume 에 gaussian 이 안뜸. 그래서 색이 없는듯.. render image 들도 없음
+
+------------------------------------Step1-------------------------------------
+
+
+isaac-ros activate --build-local
+
+
+------------------------------------Step2-------------------------------------
+cusfm_cli \
+    --input_dir /workspace/nova_carter_galileo/raw_images/rosbag_mapping_data \
+    --cusfm_base_dir /workspace/cusfm \
+    --min_inter_frame_distance 0.06 \
+    --min_inter_frame_rotation_degrees=1.5
+    
+------------------------------------Step3-------------------------------------
+
+/usr/src/tensorrt/bin/trtexec     --onnx=/workspaces/isaac_ros-dev/isaac_ros_assets/models/foundationstereo/deployable_foundation_stereo_small_v1.0/foundationstereo_576x960.onnx     --saveEngine=/workspaces/isaac_ros-dev/isaac_ros_assets/models/foundationstereo/deployable_foundation_stereo_small_v1.0/foundationstereo_576x960.engine     --noDataTransfers --memPoolSize=workspace:4096 --avgTiming=1
+
+
+ros2 run isaac_mapping_ros run_foundationstereo_trt_offline.py \
+    --image_dir /workspace/nova_carter_galileo/raw_images \
+    --output_dir /workspace/depth_lowres \
+    --frames_meta_file /workspace/cusfm/kpmap/keyframes/frames_meta.json \
+    --engine_file_path /workspaces/isaac_ros-dev/isaac_ros_assets/models/foundationstereo/deployable_foundation_stereo_small_v1.0/foundationstereo_320x736.engine \
+    --verbose
+
+python3 /opt/ros/jazzy/lib/isaac_mapping_ros/run_foundationstereo_trt_offline.py \
+    --image_dir /workspace/nova_carter_galileo/raw_images \
+    --output_dir /workspace/depth \
+    --frames_meta_file /workspace/cusfm/kpmap/keyframes/frames_meta.json \
+    --verbose
+ 
+
+python3 /opt/ros/jazzy/lib/isaac_mapping_ros/run_foundationstereo_trt_offline.py \
+    --image_dir /workspace/nova_carter-galileo/raw_images/rosbag_mapping_data_norm/ \
+    --output_dir /workspace/depth_lowres \
+    --frames_meta_file /workspace/nova_carter-galileo/raw_images/rosbag_mapping_data_norm/frames_meta_norm.json \
+    --engine_file_path /workspaces/isaac_ros-dev/isaac_ros_assets/models/foundationstereo/deployable_foundation_stereo_small_v1.0/foundationstereo_320x736.engine \
+    --verbose
+    
+python3 /opt/ros/jazzy/lib/isaac_mapping_ros/run_ess_trt_offline.py \
+    --image_dir /workspace/nova_carter-galileo/raw_images/rosbag_mapping_data \
+    --output_dir /workspace/depth_ess \
+    --frames_meta_file /workspace/nova_carter-galileo/raw_images/rosbag_mapping_data_norm/frames_meta_norm.json \
+    --engine_file_path /workspaces/isaac_ros-dev/isaac_ros_assets/models/dnn_stereo_disparity/dnn_stereo_disparity_v4.1.0_onnx_trt10.13/ess.engine \
+    --verbose
+    
+python3 /opt/ros/jazzy/lib/isaac_mapping_ros/run_ess_trt_offline.py \
+    --image_dir /workspace/nova_carter-galileo/raw_images/rosbag_mapping_data_norm \
+    --output_dir /workspace/depth_ess \
+    --frames_meta_file /workspace/nova_carter-galileo/raw_images/rosbag_mapping_data_norm/frames_meta_norm.json \
+    --engine_file_path /workspaces/isaac_ros-dev/isaac_ros_assets/models/dnn_stereo_disparity/dnn_stereo_disparity_v4.1.0_onnx_trt10.13/ess.engine \
+    --verbose
+    
+------------------------------------Step4-------------------------------------
+    
+
+
+cd nvblox/executables
+mkdir -p /workspace/nvblox_mesh
+
+
+*****ESS depth version*****
+
+./fuse_cusfm \
+    --color_image_dir /workspace/nova_carter-galileo/raw_images/rosbag_mapping_data_norm/ \
+    --depth_image_dir /workspace/depth_ess/ \
+    --frames_meta_file /workspace/nova_carter-galileo/raw_images/rosbag_mapping_data_norm/frames_meta_norm.json\
+    --save_2d_occupancy_map_path /workspace/nvblox_mesh/occupancy_map \
+    --mapping_type_dynamic \
+    --projective_integrator_max_integration_distance_m=2.5 \
+    --esdf_slice_min_height=0.09 \
+    --esdf_slice_max_height=0.65 \
+    --esdf_slice_height=0.3 \
+    --mesh_output_path /workspace/nvblox_mesh/nvblox_mesh.ply \
+    --nouse_2d_esdf_mode \
+    --fit_to_z0
+    
+
+*****Low Res depth version*****
+
+./fuse_cusfm \
+    --color_image_dir /workspace/nova_carter-galileo/raw_images/rosbag_mapping_data_norm/ \
+    --depth_image_dir /workspace/depth_lowres/ \
+    --frames_meta_file /workspace/nova_carter-galileo/raw_images/rosbag_mapping_data_norm/frames_meta_norm.json\
+    --save_2d_occupancy_map_path /workspace/nvblox_mesh/occupancy_map \
+    --mapping_type_dynamic \
+    --projective_integrator_max_integration_distance_m=2.5 \
+    --esdf_slice_min_height=0.09 \
+    --esdf_slice_max_height=0.65 \
+    --esdf_slice_height=0.3 \
+    --mesh_output_path /workspace/nvblox_mesh/nvblox_mesh.ply \
+    --nouse_2d_esdf_mode \
+    --fit_to_z0
+    
+--------------------------------------Step 5------------------------------------
+
+python train.py \
+   --config-name apps/cusfm_3dgut.yaml \
+   path=/workspace \
+   out_dir=/workspace/3dgrut \
+   initialization.fused_point_cloud_path=/workspace/nvblox_mesh/nvblox_mesh.ply \
+   experiment_name=3dgut_gs \
+   export_usdz.enabled=true \
+   export_usdz.apply_normalizing_transform=true
+   
+# python train.py    --config-name apps/cusfm_3dgut.yaml    path=/home/worv/3d_reconstruction_pipeline/robotics_dataset    out_dir=/home/worv/3d_reconstruction_pipeline/robotics_dataset/3dgrut    initialization.fused_point_cloud_path=/home/worv/3d_reconstruction_pipeline/robotics_dataset/nvblox_mesh/nvblox_mesh.ply    experiment_name=3dgut_gs    export_usdz.enabled=true    export_usdz.apply_normalizing_transform=true
+   
+python train.py \
+   --config-name apps/cusfm_3dgut.yaml \
+   path=/home/worv/3d_reconstruction_pipeline/robotics_dataset \
+   out_dir=/home/worv/3d_reconstruction_pipeline/robotics_dataset/3dgrut \
+   experiment_name=3dgut_gs \
+   export_usdz.enabled=true \
+   export_usdz.apply_normalizing_transform=true
+   
+python train.py \
+   --config-name apps/cusfm_3dgut.yaml \
+   path=/home/worv/3d_reconstruction_pipeline/robotics_dataset \
+   out_dir=/home/worv/3d_reconstruction_pipeline/robotics_dataset/3dgrut \
+   initialization.fused_point_cloud_path=./dummy.ply \
+   experiment_name=3dgut_gs \
+   export_usdz.enabled=true \
+   export_usdz.apply_normalizing_transform=true
